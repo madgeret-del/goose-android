@@ -129,8 +129,12 @@ fun ChatScreen(
                                     }
                                 }
                                 
-                                // Thinking indicator
-                                if (uiState.isLoading) {
+                                // Activating or thinking indicator
+                                if (uiState.isActivatingSession) {
+                                    item {
+                                        ActivatingIndicator()
+                                    }
+                                } else if (uiState.isLoading) {
                                     item {
                                         ThinkingIndicator()
                                     }
@@ -188,6 +192,28 @@ fun ChatScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ActivatingIndicator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Preparing session...",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

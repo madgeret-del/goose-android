@@ -15,8 +15,10 @@ data class ChatUiState(
     val messages: List<Message> = emptyList(),
     val isLoading: Boolean = false,
     val isLoadingSession: Boolean = false,
+    val isActivatingSession: Boolean = false,
     val currentSessionId: String? = null,
     val sessionName: String? = null,
+    val isSessionActivated: Boolean = false,
     val error: String? = null
 )
 
@@ -40,7 +42,8 @@ class ChatViewModel : ViewModel() {
                         it.copy(
                             currentSessionId = result.data.id,
                             messages = result.data.conversation ?: emptyList(),
-                            isLoadingSession = false
+                            isLoadingSession = false,
+                            isSessionActivated = false
                         )
                     }
                     Log.d(TAG, "Started new session: ${result.data.id}")
@@ -62,13 +65,14 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingSession = true, error = null) }
             
-            when (val result = apiService.resumeAgent(sessionId)) {
+            when (val result = apiService.resumeAgent(sessionId, loadModelAndExtensions = false)) {
                 is ApiResult.Success -> {
                     _uiState.update { 
                         it.copy(
                             currentSessionId = result.data.id,
                             messages = result.data.conversation ?: emptyList(),
-                            isLoadingSession = false
+                            isLoadingSession = false,
+                            isSessionActivated = false
                         )
                     }
                     Log.d(TAG, "Loaded session: ${result.data.id}")
@@ -87,27 +91,39 @@ class ChatViewModel : ViewModel() {
     }
     
     fun sendMessage(text: String) {
+        val trimmedText = text.trim()
+        if (trimmedText.isEmpty() || _uiState.value.isLoading) return
+        
         val sessionId = _uiState.value.currentSessionId
         
         if (sessionId == null) {
-            // Start a new session first, then send
             viewModelScope.launch {
+                _uiState.update { it.copy(isLoadingSession = true) }
+                
                 when (val result = apiService.startAgent()) {
                     is ApiResult.Success -> {
                         _uiState.update { 
-                            it.copy(currentSessionId = result.data.id)
+                            it.copy(
+                                currentSessionId = result.data.id,
+                                isLoadingSession = false,
+                                isSessionActivated = false
+                            )
                         }
-                        sendMessageToSession(text, result.data.id)
+                        Log.d(TAG, "Created session: ${result.data.id}")
+                        sendMessageToSession(trimmedText, result.data.id)
                     }
                     is ApiResult.Error -> {
                         _uiState.update { 
-                            it.copy(error = result.message)
+                            it.copy(
+                                isLoadingSession = false,
+                                error = result.message
+                            )
                         }
                     }
                 }
             }
         } else {
-            sendMessageToSession(text, sessionId)
+            sendMessageToSession(trimmedText, sessionId)
         }
     }
     
@@ -124,7 +140,43 @@ class ChatViewModel : ViewModel() {
         
         streamJob = viewModelScope.launch {
             try {
+                // Activate session if needed (matches iOS flow)
+                if (!_uiState.value.isSessionActivated) {
+                    _uiState.update { it.copy(isActivatingSession = true) }
+                    
+                    Log.d(TAG, "Activating session: $sessionId")
+                    
+                    // Resume agent with model and extensions
+                    when (val resumeResult = apiService.resumeAgent(sessionId, loadModelAndExtensions = true)) {
+                        is ApiResult.Success -> {
+                            Log.d(TAG, "Resume agent successful")
+                        }
+                        is ApiResult.Error -> {
+                            Log.e(TAG, "Resume agent failed: ${resumeResult.message}")
+                        }
+                    }
+                    
+                    // Update from session (applies system prompt)
+                    when (val updateResult = apiService.updateFromSession(sessionId)) {
+                        is ApiResult.Success -> {
+                            Log.d(TAG, "Update from session successful")
+                        }
+                        is ApiResult.Error -> {
+                            Log.e(TAG, "Update from session failed: ${updateResult.message}")
+                        }
+                    }
+                    
+                    _uiState.update { 
+                        it.copy(
+                            isSessionActivated = true,
+                            isActivatingSession = false
+                        )
+                    }
+                }
+                
+                // Now stream the chat
                 val allMessages = _uiState.value.messages
+                Log.d(TAG, "Streaming chat with ${allMessages.size} messages")
                 
                 apiService.streamChat(allMessages, sessionId)
                     .catch { e ->
@@ -132,13 +184,22 @@ class ChatViewModel : ViewModel() {
                         _uiState.update { 
                             it.copy(
                                 isLoading = false,
-                                error = e.message
+                                error = e.message ?: "Stream failed"
                             )
                         }
                     }
                     .collect { event ->
                         handleSSEEvent(event)
                     }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in sendMessageToSession", e)
+                _uiState.update { 
+                    it.copy(
+                        isLoading = false,
+                        isActivatingSession = false,
+                        error = e.message ?: "Failed to send message"
+                    )
+                }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -151,10 +212,13 @@ class ChatViewModel : ViewModel() {
                 _uiState.update { state ->
                     val existingIndex = state.messages.indexOfFirst { it.id == event.message.id }
                     val newMessages = if (existingIndex >= 0) {
+                        // Accumulate streaming text content instead of replacing
                         state.messages.toMutableList().apply {
-                            this[existingIndex] = event.message
+                            val existingMessage = this[existingIndex]
+                            this[existingIndex] = accumulateMessageContent(existingMessage, event.message)
                         }
                     } else {
+                        // Add new message
                         state.messages + event.message
                     }
                     state.copy(messages = newMessages)
@@ -171,6 +235,7 @@ class ChatViewModel : ViewModel() {
                 _uiState.update { it.copy(isLoading = false) }
             }
             is SSEEvent.UpdateConversationEvent -> {
+                Log.d(TAG, "Updating conversation with ${event.conversation.size} messages")
                 _uiState.update { 
                     it.copy(messages = event.conversation)
                 }
@@ -182,6 +247,34 @@ class ChatViewModel : ViewModel() {
                 // Ignore ping events
             }
         }
+    }
+    
+    /**
+     * Accumulate streaming content - appends new text to existing text content
+     */
+    private fun accumulateMessageContent(existing: Message, incoming: Message): Message {
+        // Get the current accumulated text from existing message
+        val existingText = existing.content
+            .filterIsInstance<MessageContent.Text>()
+            .joinToString("") { it.text }
+        
+        // Get the new text chunk from incoming message
+        val incomingText = incoming.content
+            .filterIsInstance<MessageContent.Text>()
+            .joinToString("") { it.text }
+        
+        // Combine: existing + new chunk
+        val combinedText = existingText + incomingText
+        
+        // Build new content list - keep non-text content from incoming, add combined text
+        val nonTextContent = incoming.content.filter { it !is MessageContent.Text }
+        val newContent = if (combinedText.isNotEmpty()) {
+            listOf(MessageContent.Text(text = combinedText)) + nonTextContent
+        } else {
+            nonTextContent
+        }
+        
+        return incoming.copy(content = newContent)
     }
     
     fun stopStreaming() {

@@ -11,7 +11,7 @@ data class Message(
     val role: MessageRole,
     val content: List<MessageContent>,
     val created: Long = System.currentTimeMillis(),
-    val metadata: MessageMetadata? = null
+    val metadata: MessageMetadata = MessageMetadata()
 ) {
     val hasNonEmptyTextContent: Boolean
         get() = content.any { 
@@ -44,19 +44,19 @@ data class MessageMetadata(
     val agentVisible: Boolean = true
 )
 
+// Use default "type" discriminator - matches server format
+// SerialName values match the "type" field values from server
 @Serializable
 sealed class MessageContent {
     @Serializable
     @SerialName("text")
     data class Text(
-        val type: String = "text",
         val text: String
     ) : MessageContent()
     
     @Serializable
     @SerialName("toolRequest")
     data class ToolRequest(
-        val type: String = "toolRequest",
         val id: String,
         val toolCall: ToolCall
     ) : MessageContent()
@@ -64,7 +64,6 @@ sealed class MessageContent {
     @Serializable
     @SerialName("toolResponse")
     data class ToolResponse(
-        val type: String = "toolResponse",
         val id: String,
         val toolResult: ToolResult
     ) : MessageContent()
@@ -72,7 +71,6 @@ sealed class MessageContent {
     @Serializable
     @SerialName("thinking")
     data class Thinking(
-        val type: String = "thinking",
         val thinking: String,
         val signature: String
     ) : MessageContent()

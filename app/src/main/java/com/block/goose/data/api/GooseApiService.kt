@@ -11,9 +11,6 @@ import kotlinx.serialization.json.Json
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -27,10 +24,11 @@ class GooseApiService(
 ) {
     private val TAG = "GooseApiService"
     
-    private val json = Json { 
+    val json = Json { 
         ignoreUnknownKeys = true 
         isLenient = true
         encodeDefaults = true
+        explicitNulls = false  // Don't serialize null values - server expects them omitted
     }
     
     private val client = OkHttpClient.Builder()
@@ -42,10 +40,16 @@ class GooseApiService(
     val isTrialMode: Boolean
         get() = settingsRepository.baseUrl.contains("demo-goosed.fly.dev")
     
+    private val baseUrl: String
+        get() = settingsRepository.baseUrl
+    
+    private val secretKey: String
+        get() = settingsRepository.secretKey
+    
     private fun createRequest(path: String): Request.Builder {
         return Request.Builder()
-            .url("${settingsRepository.baseUrl}$path")
-            .header("X-Secret-Key", settingsRepository.secretKey)
+            .url("${baseUrl}$path")
+            .header("X-Secret-Key", secretKey)
     }
     
     // Test connection
@@ -98,14 +102,17 @@ class GooseApiService(
                 .post(requestBody)
                 .build()
             
+            Log.d(TAG, "Starting agent with working_dir: $workingDir")
             val response = client.newCall(request).execute()
             
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: return@withContext ApiResult.Error("Empty response")
+                Log.d(TAG, "Start agent response: $body")
                 val agentResponse = json.decodeFromString<AgentResponse>(body)
                 ApiResult.Success(agentResponse)
             } else {
                 val errorBody = response.body?.string() ?: "No error details"
+                Log.e(TAG, "Start agent failed: HTTP ${response.code}: $errorBody")
                 ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
             }
         } catch (e: Exception) {
@@ -114,23 +121,78 @@ class GooseApiService(
         }
     }
     
-    // Resume agent session
-    suspend fun resumeAgent(sessionId: String): ApiResult<SessionResponse> = withContext(Dispatchers.IO) {
+    // Resume agent session - used to activate model and extensions
+    suspend fun resumeAgent(
+        sessionId: String, 
+        loadModelAndExtensions: Boolean = false
+    ): ApiResult<SessionResponse> = withContext(Dispatchers.IO) {
         try {
-            val request = createRequest("/sessions/$sessionId").get().build()
-            val response = client.newCall(request).execute()
-            
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return@withContext ApiResult.Error("Empty response")
-                val sessionResponse = json.decodeFromString<SessionResponse>(body)
-                ApiResult.Success(sessionResponse)
+            if (!loadModelAndExtensions) {
+                // Just fetch the session data without activating
+                val request = createRequest("/sessions/$sessionId").get().build()
+                val response = client.newCall(request).execute()
+                
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext ApiResult.Error("Empty response")
+                    val sessionResponse = json.decodeFromString<SessionResponse>(body)
+                    ApiResult.Success(sessionResponse)
+                } else {
+                    val errorBody = response.body?.string() ?: "No error details"
+                    ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
+                }
             } else {
-                val errorBody = response.body?.string() ?: "No error details"
-                ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
+                // Use /agent/resume to load model and extensions
+                val bodyJson = """{"session_id": "$sessionId", "load_model_and_extensions": true}"""
+                val requestBody = bodyJson.toRequestBody("application/json".toMediaType())
+                
+                val request = createRequest("/agent/resume")
+                    .post(requestBody)
+                    .build()
+                
+                Log.d(TAG, "Resuming agent with loadModelAndExtensions=true")
+                val response = client.newCall(request).execute()
+                
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext ApiResult.Error("Empty response")
+                    Log.d(TAG, "Resume agent response: $body")
+                    val sessionResponse = json.decodeFromString<SessionResponse>(body)
+                    ApiResult.Success(sessionResponse)
+                } else {
+                    val errorBody = response.body?.string() ?: "No error details"
+                    Log.e(TAG, "Resume agent failed: HTTP ${response.code}: $errorBody")
+                    ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to resume agent", e)
             ApiResult.Error(e.message ?: "Failed to resume agent")
+        }
+    }
+    
+    // Update from session - applies system prompt and recipe
+    suspend fun updateFromSession(sessionId: String): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val bodyJson = """{"session_id": "$sessionId"}"""
+            val requestBody = bodyJson.toRequestBody("application/json".toMediaType())
+            
+            val request = createRequest("/agent/update_from_session")
+                .post(requestBody)
+                .build()
+            
+            Log.d(TAG, "Updating from session: $sessionId")
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                Log.d(TAG, "Update from session successful")
+                ApiResult.Success(Unit)
+            } else {
+                val errorBody = response.body?.string() ?: "No error details"
+                Log.e(TAG, "Update from session failed: HTTP ${response.code}: $errorBody")
+                ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update from session", e)
+            ApiResult.Error(e.message ?: "Failed to update from session")
         }
     }
     
@@ -145,12 +207,15 @@ class GooseApiService(
         )
         
         val requestBody = json.encodeToString(ChatRequest.serializer(), chatRequest)
-            .toRequestBody("application/json".toMediaType())
+        Log.d(TAG, "Chat request body: $requestBody")
         
-        val request = createRequest("/reply")
-            .post(requestBody)
+        val request = Request.Builder()
+            .url("${baseUrl}/reply")
+            .header("X-Secret-Key", secretKey)
+            .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
         
         Log.d(TAG, "Starting SSE stream for session: $sessionId")
@@ -164,10 +229,14 @@ class GooseApiService(
         val response = sseClient.newCall(request).execute()
         
         if (!response.isSuccessful) {
-            throw IOException("HTTP ${response.code}: ${response.body?.string()}")
+            val errorBody = response.body?.string() ?: "Unknown error"
+            Log.e(TAG, "SSE request failed: HTTP ${response.code}: $errorBody")
+            throw IOException("HTTP ${response.code}: $errorBody")
         }
         
         val source = response.body?.source() ?: throw IOException("Empty response body")
+        
+        Log.d(TAG, "SSE connection established, reading events...")
         
         while (!source.exhausted()) {
             val line = source.readUtf8Line() ?: break
@@ -176,12 +245,11 @@ class GooseApiService(
                 val eventData = line.removePrefix("data: ")
                 if (eventData.isNotEmpty()) {
                     try {
-                        // Parse the SSE event based on type field
+                        Log.d(TAG, "SSE event data: $eventData")
                         val event = parseSSEEvent(eventData)
                         if (event != null) {
                             emit(event)
                             
-                            // Check for finish event
                             if (event is SSEEvent.FinishEvent) {
                                 Log.d(TAG, "Stream finished: ${event.reason}")
                                 break
@@ -195,14 +263,16 @@ class GooseApiService(
         }
         
         response.close()
+        Log.d(TAG, "SSE stream closed")
     }.flowOn(Dispatchers.IO)
     
     private fun parseSSEEvent(data: String): SSEEvent? {
         return try {
-            // First, determine the event type
             val typeRegex = """"type"\s*:\s*"([^"]+)"""".toRegex()
             val typeMatch = typeRegex.find(data)
             val type = typeMatch?.groupValues?.get(1)
+            
+            Log.d(TAG, "Parsing SSE event type: $type")
             
             when (type) {
                 "Message" -> json.decodeFromString<SSEEvent.MessageEvent>(data)
