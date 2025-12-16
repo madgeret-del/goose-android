@@ -18,6 +18,8 @@ import com.block.goose.ui.screens.ChatScreen
 import com.block.goose.ui.screens.HomeScreen
 import com.block.goose.ui.screens.SettingsScreen
 import com.block.goose.ui.theme.GooseTheme
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,12 +49,16 @@ fun GooseNavigation() {
     ) {
         composable("home") {
             HomeScreen(
-                onNavigateToChat = { sessionId ->
-                    if (sessionId != null) {
-                        navController.navigate("chat/$sessionId")
+                onNavigateToChat = { sessionId, initialMessage ->
+                    val route = if (sessionId != null) {
+                        "chat/$sessionId"
+                    } else if (initialMessage != null) {
+                        val encoded = URLEncoder.encode(initialMessage, "UTF-8")
+                        "chat/new?message=$encoded"
                     } else {
-                        navController.navigate("chat/new")
+                        "chat/new"
                     }
+                    navController.navigate(route)
                 },
                 onNavigateToSettings = {
                     navController.navigate("settings")
@@ -61,16 +67,27 @@ fun GooseNavigation() {
         }
         
         composable(
-            route = "chat/{sessionId}",
+            route = "chat/{sessionId}?message={message}",
             arguments = listOf(
                 navArgument("sessionId") { 
                     type = NavType.StringType 
+                },
+                navArgument("message") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
                 }
             )
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString("sessionId")
+            val encodedMessage = backStackEntry.arguments?.getString("message")
+            val initialMessage = encodedMessage?.let { 
+                URLDecoder.decode(it, "UTF-8") 
+            }
+            
             ChatScreen(
                 sessionId = if (sessionId == "new") null else sessionId,
+                initialMessage = initialMessage,
                 onNavigateBack = {
                     navController.popBackStack()
                 }

@@ -16,53 +16,106 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// Goose brand colors
-val GooseOrange = Color(0xFFFF6B35)
-val GooseOrangeLight = Color(0xFFFF8C5A)
-val GooseOrangeDark = Color(0xFFE55A28)
+// Neutral/System colors - matching iOS which uses black/dark for primary
+val GoosePrimary = Color(0xFF1C1C1E)  // Dark neutral - same as iOS dark mode background
+val GoosePrimaryLight = Color(0xFF000000)  // Pure black for light mode accents
 
-// Light theme colors
+// Light Theme Colors - clean, minimal like iOS
 private val LightColorScheme = lightColorScheme(
-    primary = GooseOrange,
+    primary = GoosePrimaryLight,
     onPrimary = Color.White,
-    primaryContainer = GooseOrangeLight,
-    onPrimaryContainer = Color.Black,
-    secondary = Color(0xFF1A1A1A),
+    primaryContainer = Color(0xFFF5F5F7),
+    onPrimaryContainer = Color(0xFF1C1C1E),
+    secondary = Color(0xFF2196F3),
     onSecondary = Color.White,
-    background = Color.White,
-    onBackground = Color(0xFF1A1A1A),
-    surface = Color(0xFFF5F5F5),
-    onSurface = Color(0xFF1A1A1A),
-    surfaceVariant = Color(0xFFE8E8E8),
+    secondaryContainer = Color(0xFFD6E8FF),
+    onSecondaryContainer = Color(0xFF001B3D),
+    tertiary = Color(0xFF4CAF50),
+    onTertiary = Color.White,
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF1C1C1E),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1C1C1E),
+    surfaceVariant = Color(0xFFF5F5F7),
     onSurfaceVariant = Color(0xFF666666),
-    outline = Color(0xFFCCCCCC),
-    error = Color(0xFFDC3545),
+    outline = Color(0xFFE0E0E0),
+    outlineVariant = Color(0xFFEBEBED),
+    error = Color(0xFFF44336),
     onError = Color.White
 )
 
-// Dark theme colors
+// Dark Theme Colors (matching iOS dark mode)
 private val DarkColorScheme = darkColorScheme(
-    primary = GooseOrange,
-    onPrimary = Color.Black,
-    primaryContainer = GooseOrangeDark,
+    primary = Color.White,  // White primary for dark mode
+    onPrimary = Color(0xFF1C1C1E),
+    primaryContainer = Color(0xFF2C2C2E),
     onPrimaryContainer = Color.White,
-    secondary = Color(0xFFE0E0E0),
-    onSecondary = Color.Black,
-    background = Color(0xFF121212),
+    secondary = Color(0xFF64B5F6),
+    onSecondary = Color(0xFF003062),
+    secondaryContainer = Color(0xFF004788),
+    onSecondaryContainer = Color(0xFFD6E8FF),
+    tertiary = Color(0xFF66BB6A),
+    onTertiary = Color(0xFF003910),
+    background = Color(0xFF1C1C1E),  // iOS dark mode background
     onBackground = Color.White,
-    surface = Color(0xFF1E1E1E),
+    surface = Color(0xFF1C1C1E),
     onSurface = Color.White,
-    surfaceVariant = Color(0xFF2C2C2C),
-    onSurfaceVariant = Color(0xFFA0A0A0),
-    outline = Color(0xFF444444),
-    error = Color(0xFFFF6B6B),
-    onError = Color.Black
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFFB0B0B0),
+    outline = Color(0xFF48484A),
+    outlineVariant = Color(0xFF38383A),
+    error = Color(0xFFEF5350),
+    onError = Color.White
 )
+
+// Additional Goose-specific colors
+object GooseColors {
+    // Message bubbles - user bubbles are dark/black like iOS
+    @Composable
+    fun userBubble() = if (isSystemInDarkTheme()) Color.White else Color(0xFF1C1C1E)
+    
+    @Composable
+    fun userBubbleText() = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color.White
+    
+    @Composable
+    fun assistantBubble() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFF0F0F2)
+    
+    @Composable
+    fun assistantBubbleText() = if (isSystemInDarkTheme()) Color.White else Color(0xFF1C1C1E)
+    
+    // Input field
+    @Composable
+    fun inputBackground() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFF5F5F8)
+    
+    @Composable
+    fun inputBorder() = if (isSystemInDarkTheme()) Color(0xFF48484A) else Color(0xFFE0E0E0)
+    
+    // Tool/code backgrounds
+    @Composable
+    fun toolBackground() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color(0xFFF5F5F5)
+    
+    val CodeBackground = Color(0xFF1E1E1E)
+    val CodeText = Color(0xFFD4D4D4)
+    
+    // Status colors
+    val Success = Color(0xFF4CAF50)
+    val Error = Color(0xFFF44336)
+    val Warning = Color(0xFFFFC107)
+    val Info = Color(0xFF2196F3)
+    
+    // Thinking animation
+    val ThinkingCyan = Color(0xFF00BCD4)
+    val ThinkingYellow = Color(0xFFFFEB3B)
+    
+    // Logo tint - dark in light mode, white in dark mode
+    @Composable
+    fun logoTint() = if (isSystemInDarkTheme()) Color.White else Color(0xFF1C1C1E)
+}
 
 @Composable
 fun GooseTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Disable dynamic color to maintain brand consistency
+    dynamicColor: Boolean = false, // Disabled to use Goose brand colors
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -78,10 +131,8 @@ fun GooseTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            window.navigationBarColor = Color.Transparent.toArgb()
+            window.statusBarColor = colorScheme.background.toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
-            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
         }
     }
 

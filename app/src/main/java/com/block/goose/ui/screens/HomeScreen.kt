@@ -22,7 +22,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.block.goose.data.model.ChatSession
 import com.block.goose.ui.components.ChatInputView
 import com.block.goose.ui.components.WelcomeCard
-import com.block.goose.ui.theme.GooseOrange
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -31,7 +30,7 @@ import java.time.temporal.ChronoUnit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onNavigateToChat: (String?) -> Unit,
+    onNavigateToChat: (String?, String?) -> Unit,  // (sessionId, initialMessage)
     onNavigateToSettings: () -> Unit,
     viewModel: HomeViewModel = viewModel()
 ) {
@@ -64,11 +63,11 @@ fun HomeScreen(
                     sessions = uiState.sessions,
                     onSessionSelect = { sessionId ->
                         showingSidebar = false
-                        onNavigateToChat(sessionId)
+                        onNavigateToChat(sessionId, null)
                     },
                     onNewSession = {
                         showingSidebar = false
-                        onNavigateToChat(null)
+                        onNavigateToChat(null, null)
                     },
                     onSettingsClick = {
                         showingSidebar = false
@@ -119,7 +118,7 @@ fun HomeScreen(
                                 Text(
                                     text = "Trial Mode",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = GooseOrange
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -128,7 +127,7 @@ fun HomeScreen(
                         SessionsList(
                             sessions = uiState.sessions,
                             onSessionClick = { session ->
-                                onNavigateToChat(session.id)
+                                onNavigateToChat(session.id, null)
                             }
                         )
                     }
@@ -148,7 +147,9 @@ fun HomeScreen(
                     onSubmit = {
                         if (inputText.isNotBlank()) {
                             // Navigate to chat with the initial message
-                            onNavigateToChat(null)
+                            val message = inputText
+                            inputText = ""  // Clear after capturing
+                            onNavigateToChat(null, message)
                         }
                     },
                     modifier = Modifier.padding(bottom = 16.dp)
@@ -310,7 +311,7 @@ private fun TrialModeBanner(
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(12.dp),
-        color = GooseOrange.copy(alpha = 0.1f)
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -325,7 +326,7 @@ private fun TrialModeBanner(
                 Text(
                     text = "Trial Mode",
                     style = MaterialTheme.typography.labelLarge,
-                    color = GooseOrange,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     fontWeight = FontWeight.Bold
                 )
                 Text(

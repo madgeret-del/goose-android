@@ -16,7 +16,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.block.goose.ui.theme.GooseOrange
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +97,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = if (uiState.isConnected) Icons.Default.CheckCircle else Icons.Default.Close,
                             contentDescription = null,
-                            tint = if (uiState.isConnected) Color.Green else Color.Red
+                            tint = if (uiState.isConnected) Color(0xFF4CAF50) else Color(0xFFF44336)
                         )
                         Column {
                             Text(
@@ -157,7 +156,7 @@ fun SettingsScreen(
                     onClick = { showResetDialog = true },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = GooseOrange
+                        contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
                     Text("Reset to Trial Mode")

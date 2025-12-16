@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatScreen(
     sessionId: String?,
+    initialMessage: String? = null,
     onNavigateBack: () -> Unit,
     viewModel: ChatViewModel = viewModel()
 ) {
@@ -30,12 +31,23 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     
+    // Track if we've sent the initial message
+    var hasProcessedInitialMessage by remember { mutableStateOf(false) }
+    
     // Load session or start new one
     LaunchedEffect(sessionId) {
         if (sessionId != null) {
             viewModel.loadSession(sessionId)
         } else {
             viewModel.startNewSession()
+        }
+    }
+    
+    // Auto-send initial message once session is activated
+    LaunchedEffect(uiState.isSessionActivated, hasProcessedInitialMessage) {
+        if (uiState.isSessionActivated && !hasProcessedInitialMessage && !initialMessage.isNullOrBlank()) {
+            hasProcessedInitialMessage = true
+            viewModel.sendMessage(initialMessage)
         }
     }
     
@@ -102,16 +114,28 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        uiState.messages.isEmpty() -> {
-                            // Empty state
-                            Text(
-                                text = "Start a conversation...",
+                        uiState.messages.isEmpty() && !uiState.isActivatingSession -> {
+                            // Empty state - show pending message if any
+                            Column(
                                 modifier = Modifier
                                     .align(Alignment.Center)
                                     .padding(32.dp),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (!initialMessage.isNullOrBlank() && !hasProcessedInitialMessage) {
+                                    Text(
+                                        text = "Preparing to send...",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Start a conversation...",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                         else -> {
                             // Messages
@@ -175,11 +199,11 @@ fun ChatScreen(
                         )
                 )
                 
-                // Chat input
+                // Chat input - using updated parameter names
                 ChatInputView(
-                    text = inputText,
-                    onTextChange = { inputText = it },
-                    onSubmit = {
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    onSend = {
                         if (inputText.isNotBlank()) {
                             viewModel.sendMessage(inputText)
                             inputText = ""
@@ -187,7 +211,6 @@ fun ChatScreen(
                     },
                     onStop = { viewModel.stopStreaming() },
                     isLoading = uiState.isLoading,
-                    showPlusButton = true,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
             }

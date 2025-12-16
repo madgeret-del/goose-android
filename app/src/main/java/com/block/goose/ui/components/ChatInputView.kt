@@ -29,17 +29,26 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun ChatInputView(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onSubmit: () -> Unit,
+    text: String = "",
+    onTextChange: ((String) -> Unit)? = null,
+    onSubmit: (() -> Unit)? = null,
+    // New parameter names for compatibility
+    value: String = text,
+    onValueChange: ((String) -> Unit)? = onTextChange,
+    onSend: (() -> Unit)? = onSubmit,
     onStop: (() -> Unit)? = null,
     isLoading: Boolean = false,
     showPlusButton: Boolean = false,
     placeholder: String = "I want to...",
     modifier: Modifier = Modifier
 ) {
+    // Use whichever params are provided
+    val actualText = if (onValueChange != null) value else text
+    val actualOnChange = onValueChange ?: onTextChange ?: {}
+    val actualOnSubmit = onSend ?: onSubmit ?: {}
+    
     val focusRequester = remember { FocusRequester() }
-    val canSubmit = text.isNotBlank()
+    val canSubmit = actualText.isNotBlank()
     
     Surface(
         modifier = modifier
@@ -57,8 +66,8 @@ fun ChatInputView(
         ) {
             // Text field
             BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
+                value = actualText,
+                onValueChange = actualOnChange,
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
@@ -71,7 +80,7 @@ fun ChatInputView(
                 maxLines = 4,
                 decorationBox = { innerTextField ->
                     Box {
-                        if (text.isEmpty()) {
+                        if (actualText.isEmpty()) {
                             Text(
                                 text = placeholder,
                                 style = TextStyle(
@@ -122,7 +131,7 @@ fun ChatInputView(
                         if (isLoading && onStop != null) {
                             onStop()
                         } else if (canSubmit) {
-                            onSubmit()
+                            actualOnSubmit()
                         }
                     },
                     enabled = isLoading || canSubmit,
