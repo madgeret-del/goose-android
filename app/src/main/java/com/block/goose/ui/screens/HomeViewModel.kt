@@ -28,15 +28,17 @@ class HomeViewModel : ViewModel() {
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
     
     init {
-        // Observe trial mode changes
+        // Observe settings changes and reload sessions when baseUrl changes
         viewModelScope.launch {
-            settingsRepository.isTrialModeFlow.collect { isTrialMode ->
-                _uiState.update { it.copy(isTrialMode = isTrialMode) }
-            }
+            settingsRepository.baseUrlFlow
+                .distinctUntilChanged()
+                .collect { baseUrl ->
+                    val isTrialMode = baseUrl.contains("demo-goosed.fly.dev")
+                    _uiState.update { it.copy(isTrialMode = isTrialMode) }
+                    Log.d(TAG, "Base URL changed, reloading sessions. Trial mode: $isTrialMode")
+                    loadSessions()
+                }
         }
-        
-        // Load sessions on init
-        loadSessions()
     }
     
     fun loadSessions() {

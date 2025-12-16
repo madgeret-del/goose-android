@@ -43,9 +43,13 @@ fun ChatScreen(
         }
     }
     
-    // Auto-send initial message once session is activated
-    LaunchedEffect(uiState.isSessionActivated, hasProcessedInitialMessage) {
-        if (uiState.isSessionActivated && !hasProcessedInitialMessage && !initialMessage.isNullOrBlank()) {
+    // Auto-send initial message once we have a session ID (not waiting for full activation)
+    // The sendMessage function handles session activation internally
+    LaunchedEffect(uiState.currentSessionId, hasProcessedInitialMessage) {
+        if (uiState.currentSessionId != null && 
+            !hasProcessedInitialMessage && 
+            !initialMessage.isNullOrBlank() &&
+            !uiState.isLoadingSession) {
             hasProcessedInitialMessage = true
             viewModel.sendMessage(initialMessage)
         }
@@ -114,7 +118,7 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        uiState.messages.isEmpty() && !uiState.isActivatingSession -> {
+                        uiState.messages.isEmpty() && !uiState.isActivatingSession && !uiState.isLoading -> {
                             // Empty state - show pending message if any
                             Column(
                                 modifier = Modifier
@@ -123,6 +127,8 @@ fun ChatScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 if (!initialMessage.isNullOrBlank() && !hasProcessedInitialMessage) {
+                                    CircularProgressIndicator()
+                                    Spacer(modifier = Modifier.height(16.dp))
                                     Text(
                                         text = "Preparing to send...",
                                         style = MaterialTheme.typography.bodyLarge,
