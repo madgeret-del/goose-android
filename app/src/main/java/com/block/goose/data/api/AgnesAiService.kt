@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -19,10 +20,19 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/**
- * Реализация AiService для Agnes AI.
- * Использует OpenAI-совместимый API формат.
- */
+@Serializable
+data class AgnesMessage(
+    val role: String,
+    val content: String
+)
+
+@Serializable
+data class AgnesChatRequest(
+    val model: String,
+    val messages: List<AgnesMessage>,
+    val stream: Boolean = true
+)
+
 class AgnesAiService(
     private val baseUrl: String,
     private val apiKey: String,
@@ -30,7 +40,6 @@ class AgnesAiService(
 ) : AiService {
 
     private val TAG = "AgnesAiService"
-    
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -49,7 +58,6 @@ class AgnesAiService(
                 .header("Authorization", "Bearer $apiKey")
                 .get()
                 .build()
-            
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
                 Log.d(TAG, "Connection test successful")
@@ -65,12 +73,10 @@ class AgnesAiService(
     }
 
     override suspend fun fetchSessions(): ApiResult<List<ChatSession>> {
-        // Agnes AI не поддерживает сессии в том же формате, возвращаем пустой список
         return ApiResult.Success(emptyList())
     }
 
     override suspend fun startNewSession(): ApiResult<String> {
-        // Генерируем локальный ID для отслеживания диалога
         return ApiResult.Success(java.util.UUID.randomUUID().toString())
     }
 
@@ -79,15 +85,14 @@ class AgnesAiService(
         sessionId: String
     ): Flow<SSEEvent> = flow {
         try {
-            // 1. Преобразуем сообщения в формат Agnes AI
             val agnesMessages = messages.map { msg ->
-                mapOf(
-                    "role" to when (msg.role) {
+                AgnesMessage(
+                    role = when (msg.role) {
                         MessageRole.USER -> "user"
                         MessageRole.ASSISTANT -> "assistant"
                         MessageRole.SYSTEM -> "system"
                     },
-                    "content" to msg.content.joinToString(" ") { 
+                    content = msg.content.joinToString(" ") {
                         when (it) {
                             is com.block.goose.data.model.MessageContent.Text -> it.text
                             else -> it.toString()
@@ -96,57 +101,46 @@ class AgnesAiService(
                 )
             }
 
-            // 2. Формируем запрос
-            val requestBodyMap = mapOf(
-                "model" to modelName,
-                "messages" to agnesMessages,
-                "stream" to true
+            val request = AgnesChatRequest(
+                model = modelName,
+                messages = agnesMessages,
+                stream = true
             )
-            val requestBodyJson = json.encodeToString(requestBodyMap)
+
+            val requestBodyJson = json.encodeToString(request)
             Log.d(TAG, "Request: $requestBodyJson")
 
-            val request = Request.Builder()
+            val httpRequest = Request.Builder()
                 .url("$baseUrl/chat/completions")
                 .header("Authorization", "Bearer $apiKey")
                 .header("Content-Type", "application/json")
                 .post(requestBodyJson.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            // 3. Выполняем запрос
-            val response = client.newCall(request).execute()
+            val response = client.newCall(httpRequest).execute()
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string() ?: "Unknown error"
                 Log.e(TAG, "Request failed: ${response.code} - $errorBody")
                 throw IOException("HTTP ${response.code}: $errorBody")
             }
 
-            // 4. Обрабатываем SSE-поток
             val source = response.body?.source() ?: throw IOException("Empty response body")
             var accumulatedContent = ""
 
             while (!source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
-                
                 if (line.startsWith("data: ")) {
                     val data = line.removePrefix("data: ")
-                    
-                    // Проверяем завершение потока
-                    if (data == "[DONE]") {
-                        break
-                    }
+                    if (data == "[DONE]") break
 
                     try {
-                        // Парсим событие от Agnes AI
                         val event = parseAgnesEvent(data)
                         if (event != null) {
-                            // Если это текстовое сообщение, накапливаем его
                             if (event is SSEEvent.MessageEvent) {
                                 val textContent = event.message.content
                                     .filterIsInstance<com.block.goose.data.model.MessageContent.Text>()
                                     .joinToString("") { it.text }
                                 accumulatedContent += textContent
-                                
-                                // Отправляем обновлённое сообщение
                                 emit(event)
                             } else {
                                 emit(event)
@@ -158,7 +152,6 @@ class AgnesAiService(
                 }
             }
 
-            // 5. Отправляем финальное событие
             if (accumulatedContent.isNotEmpty()) {
                 val finalMessage = Message.assistant(accumulatedContent)
                 emit(SSEEvent.MessageEvent(message = finalMessage))
@@ -173,34 +166,18 @@ class AgnesAiService(
         }
     }
 
-    /**
-     * Парсит SSE-событие от Agnes AI (OpenAI-совместимый формат)
-     */
     private fun parseAgnesEvent(data: String): SSEEvent? {
         return try {
             val jsonElement = json.parseToJsonElement(data)
-            val jsonObject = jsonElement.jsonObject
-            
-            // Проверяем, есть ли выборы
-            val choices = jsonObject["choices"]?.jsonArray ?: return null
+            val choices = jsonElement.jsonObject["choices"]?.jsonArray ?: return null
             val choice = choices.firstOrNull()?.jsonObject ?: return null
-            
-            // Извлекаем дельту
             val delta = choice["delta"]?.jsonObject ?: return null
-            
-            // Извлекаем контент
             val content = delta["content"]?.jsonPrimitive?.content
-            val role = delta["role"]?.jsonPrimitive?.content
-            
             if (content != null && content.isNotEmpty()) {
-                // Создаём сообщение с текстом
-                val message = Message(
-                    role = if (role == "assistant") MessageRole.ASSISTANT else MessageRole.ASSISTANT,
-                    content = listOf(com.block.goose.data.model.MessageContent.Text(text = content))
+                SSEEvent.MessageEvent(
+                    message = Message.assistant(content)
                 )
-                SSEEvent.MessageEvent(message = message)
             } else {
-                // Проверяем, не завершена ли поток
                 val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
                 if (finishReason != null) {
                     SSEEvent.FinishEvent(reason = finishReason)
@@ -209,7 +186,7 @@ class AgnesAiService(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse Agnes event", e)
+            Log.e(TAG, "parseAgnesEvent error", e)
             null
         }
     }
