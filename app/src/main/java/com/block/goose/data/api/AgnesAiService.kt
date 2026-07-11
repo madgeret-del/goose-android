@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -107,6 +108,7 @@ class AgnesAiService(
                 stream = true
             )
 
+            // ПРАВИЛЬНАЯ СЕРИАЛИЗАЦИЯ
             val requestBodyJson = json.encodeToString(request)
             Log.d(TAG, "Request: $requestBodyJson")
 
