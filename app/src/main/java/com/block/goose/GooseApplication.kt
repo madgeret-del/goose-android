@@ -10,18 +10,15 @@ class GooseApplication : Application() {
     private set
     lateinit var apiService: GooseApiService
     private set
-    lateinit var agnesAiService: AgnesAiService  // ⬅️ НОВОЕ
+    lateinit var agnesAiService: AgnesAiService
     private set
 
     override fun onCreate() {
         super.onCreate()
         instance = this
 
-        // Initialize repositories and services
         settingsRepository = SettingsRepository(this)
         apiService = GooseApiService(settingsRepository)
-        
-        // ⬅️ НОВОЕ: Инициализация Agnes AI
         agnesAiService = AgnesAiService(
             baseUrl = settingsRepository.baseUrl,
             apiKey = settingsRepository.secretKey
