@@ -278,6 +278,46 @@ class GooseApiService(
             null
         }
     }
+}            Log.d(TAG, "Stream finished: ${event.reason}")
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse SSE event: $eventData", e)
+                    }
+                }
+            }
+        }
+        
+        response.close()
+        Log.d(TAG, "SSE stream closed")
+    }.flowOn(Dispatchers.IO)
+    
+    private fun parseSSEEvent(data: String): SSEEvent? {
+        return try {
+            val typeRegex = """"type"\s*:\s*"([^"]+)"""".toRegex()
+            val typeMatch = typeRegex.find(data)
+            val type = typeMatch?.groupValues?.get(1)
+            
+            Log.d(TAG, "Parsing SSE event type: $type")
+            
+            when (type) {
+                "Message" -> json.decodeFromString<SSEEvent.MessageEvent>(data)
+                "Error" -> json.decodeFromString<SSEEvent.ErrorEvent>(data)
+                "Finish" -> json.decodeFromString<SSEEvent.FinishEvent>(data)
+                "ModelChange" -> json.decodeFromString<SSEEvent.ModelChangeEvent>(data)
+                "Ping" -> json.decodeFromString<SSEEvent.PingEvent>(data)
+                "UpdateConversation" -> json.decodeFromString<SSEEvent.UpdateConversationEvent>(data)
+                else -> {
+                    Log.w(TAG, "Unknown SSE event type: $type")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "SSE parse error for: $data", e)
+            null
+        }
+    }
 } events...")
         
         while (!source.exhausted()) {
