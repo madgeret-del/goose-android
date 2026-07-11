@@ -14,11 +14,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-sealed class ApiResult<out T> {
-    data class Success<T>(val data: T) : ApiResult<T>()
-    data class Error(val message: String, val code: Int? = null) : ApiResult<Nothing>()
-}
-
 class GooseApiService(
     private val settingsRepository: SettingsRepository
 ) {
@@ -28,7 +23,7 @@ class GooseApiService(
         ignoreUnknownKeys = true 
         isLenient = true
         encodeDefaults = true
-        explicitNulls = false  // Don't serialize null values - server expects them omitted
+        explicitNulls = false
     }
     
     private val client = OkHttpClient.Builder()
@@ -52,7 +47,6 @@ class GooseApiService(
             .header("X-Secret-Key", secretKey)
     }
     
-    // Test connection
     suspend fun testConnection(): ApiResult<Boolean> = withContext(Dispatchers.IO) {
         try {
             val request = createRequest("/status").get().build()
@@ -69,7 +63,6 @@ class GooseApiService(
         }
     }
     
-    // Fetch sessions
     suspend fun fetchSessions(): ApiResult<List<ChatSession>> = withContext(Dispatchers.IO) {
         if (isTrialMode) {
             return@withContext ApiResult.Success(emptyList())
@@ -92,7 +85,6 @@ class GooseApiService(
         }
     }
     
-    // Start new agent session
     suspend fun startAgent(workingDir: String = "."): ApiResult<AgentResponse> = withContext(Dispatchers.IO) {
         try {
             val bodyJson = """{"working_dir": "$workingDir"}"""
@@ -121,14 +113,12 @@ class GooseApiService(
         }
     }
     
-    // Resume agent session - used to activate model and extensions
     suspend fun resumeAgent(
         sessionId: String, 
         loadModelAndExtensions: Boolean = false
     ): ApiResult<SessionResponse> = withContext(Dispatchers.IO) {
         try {
             if (!loadModelAndExtensions) {
-                // Just fetch the session data without activating
                 val request = createRequest("/sessions/$sessionId").get().build()
                 val response = client.newCall(request).execute()
                 
@@ -141,7 +131,6 @@ class GooseApiService(
                     ApiResult.Error("HTTP ${response.code}: $errorBody", response.code)
                 }
             } else {
-                // Use /agent/resume to load model and extensions
                 val bodyJson = """{"session_id": "$sessionId", "load_model_and_extensions": true}"""
                 val requestBody = bodyJson.toRequestBody("application/json".toMediaType())
                 
@@ -169,7 +158,6 @@ class GooseApiService(
         }
     }
     
-    // Update from session - applies system prompt and recipe
     suspend fun updateFromSession(sessionId: String): ApiResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val bodyJson = """{"session_id": "$sessionId"}"""
@@ -196,7 +184,6 @@ class GooseApiService(
         }
     }
     
-    // Stream chat with SSE
     fun streamChat(
         messages: List<Message>,
         sessionId: String
@@ -222,7 +209,7 @@ class GooseApiService(
         
         val sseClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // No timeout for SSE
+            .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
         
@@ -237,6 +224,61 @@ class GooseApiService(
         val source = response.body?.source() ?: throw IOException("Empty response body")
         
         Log.d(TAG, "SSE connection established, reading events...")
+        
+        while (!source.exhausted()) {
+            val line = source.readUtf8Line() ?: break
+            
+            if (line.startsWith("data: ")) {
+                val eventData = line.removePrefix("data: ")
+                if (eventData.isNotEmpty()) {
+                    try {
+                        Log.d(TAG, "SSE event data: $eventData")
+                        val event = parseSSEEvent(eventData)
+                        if (event != null) {
+                            emit(event)
+                            
+                            if (event is SSEEvent.FinishEvent) {
+                                Log.d(TAG, "Stream finished: ${event.reason}")
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse SSE event: $eventData", e)
+                    }
+                }
+            }
+        }
+        
+        response.close()
+        Log.d(TAG, "SSE stream closed")
+    }.flowOn(Dispatchers.IO)
+    
+    private fun parseSSEEvent(data: String): SSEEvent? {
+        return try {
+            val typeRegex = """"type"\s*:\s*"([^"]+)"""".toRegex()
+            val typeMatch = typeRegex.find(data)
+            val type = typeMatch?.groupValues?.get(1)
+            
+            Log.d(TAG, "Parsing SSE event type: $type")
+            
+            when (type) {
+                "Message" -> json.decodeFromString<SSEEvent.MessageEvent>(data)
+                "Error" -> json.decodeFromString<SSEEvent.ErrorEvent>(data)
+                "Finish" -> json.decodeFromString<SSEEvent.FinishEvent>(data)
+                "ModelChange" -> json.decodeFromString<SSEEvent.ModelChangeEvent>(data)
+                "Ping" -> json.decodeFromString<SSEEvent.PingEvent>(data)
+                "UpdateConversation" -> json.decodeFromString<SSEEvent.UpdateConversationEvent>(data)
+                else -> {
+                    Log.w(TAG, "Unknown SSE event type: $type")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "SSE parse error for: $data", e)
+            null
+        }
+    }
+} events...")
         
         while (!source.exhausted()) {
             val line = source.readUtf8Line() ?: break
